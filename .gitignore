@@ -1,0 +1,19 @@
+# Root-level generated files
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Backend
+backend/target/
+backend/.env
+backend/.env.local
+backend/.env.*.local

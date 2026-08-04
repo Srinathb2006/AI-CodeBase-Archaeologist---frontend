@@ -1,0 +1,15 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Force dark mode globally */
+html {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  background-color: #0F172A;
+  color: #F8FAFC;
+}
