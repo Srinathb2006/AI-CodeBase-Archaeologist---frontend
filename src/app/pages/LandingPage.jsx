@@ -56,7 +56,7 @@ export function LandingPage() {
                 <div className="text-center">
                   <Code className="w-20 h-20 text-purple-600 mx-auto mb-4" />
                   <p className="text-slate-600 font-medium">
-                    Interactive Code Visualization
+                    AI-Powered Codebase Analysis
                   </p>
                 </div>
               </div>
@@ -77,40 +77,40 @@ export function LandingPage() {
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[
             {
+              icon: Sparkles,
+              title: "RAG-Powered AI Assistant",
+              description:
+                "Ask questions about your codebase and get grounded answers with relevant source references.",
+            },
+            {
               icon: Network,
-              title: "Architecture Discovery",
+              title: "Architecture Analysis",
               description:
-                "Automatically visualize system architecture, components, and data flows",
-            },
-            {
-              icon: Zap,
-              title: "Dependency Mapping",
-              description:
-                "Interactive graphs showing all code dependencies and relationships",
-            },
-            {
-              icon: FileSearch,
-              title: "AI Documentation",
-              description:
-                "Generate comprehensive docs from your codebase instantly",
+                "Understand project structure, components, layers, and relationships automatically.",
             },
             {
               icon: Code,
               title: "API Explorer",
               description:
-                "Discover and document all API endpoints automatically",
+                "Discover and inspect API endpoints detected from the uploaded repository.",
+            },
+            {
+              icon: FileSearch,
+              title: "Code Explorer",
+              description:
+                "Browse the repository file tree and inspect source code directly.",
+            },
+            {
+              icon: Zap,
+              title: "Technology & Dependency Analysis",
+              description:
+                "Detect frameworks, libraries, languages, and project dependencies from repository manifests.",
             },
             {
               icon: Database,
               title: "Database Analysis",
               description:
-                "Visualize database schemas, tables, and relationships",
-            },
-            {
-              icon: Sparkles,
-              title: "Repository Insights",
-              description:
-                "Get AI-powered insights about code quality and patterns",
+                "Analyze database schemas, entities, migrations, and relationships when database information is present.",
             },
           ].map((feature, index) => (
             <div
@@ -177,80 +177,17 @@ export function LandingPage() {
 
 
       {/* Footer */}
-      <footer className="border-t border-purple-200 py-12 bg-white/50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                  <span className="font-bold text-white">A</span>
-                </div>
-                <span className="font-semibold">AI Codebase Archaeologist</span>
-              </div>
-              <p className="text-sm text-slate-600">
-                Unearth the secrets of any codebase with AI-powered analysis
-              </p>
+      <footer className="border-t border-purple-200/60 py-8 bg-white/40">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-slate-600">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+              <span className="font-bold text-white text-xs">A</span>
             </div>
-            <div>
-              <h4 className="font-semibold mb-4 text-slate-900">Product</h4>
-              <ul className="space-y-2 text-sm text-slate-600">
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Features
-                  </a>
-                </li>
-
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Documentation
-                  </a>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4 text-slate-900">Company</h4>
-              <ul className="space-y-2 text-sm text-slate-600">
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    About
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Blog
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Careers
-                  </a>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold mb-4 text-slate-900">Legal</h4>
-              <ul className="space-y-2 text-sm text-slate-600">
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Privacy
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Terms
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="hover:text-purple-600">
-                    Security
-                  </a>
-                </li>
-              </ul>
-            </div>
+            <span className="font-semibold text-slate-900">AI Codebase Archaeologist</span>
           </div>
-          <div className="pt-8 border-t border-purple-200 text-center text-sm text-slate-600">
-            © 2026 AI Codebase Archaeologist. All rights reserved.
-          </div>
+          <p className="text-slate-500 text-xs sm:text-sm">
+            AI-Powered Codebase Analysis & Exploration
+          </p>
         </div>
       </footer>
     </div>

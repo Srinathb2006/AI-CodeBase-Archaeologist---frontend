@@ -20,8 +20,13 @@ export async function apiRequest(path, init = {}) {
   } catch {
     data = text;
   }
-
   if (!response.ok) {
+    if (response.status === 401) {
+      // Token expired or invalid — clear session and redirect to login
+      localStorage.removeItem("archaeologist_active_user");
+      window.location.href = "/login";
+      throw new Error("Session expired. Please log in again.");
+    }
     const message = data?.message || data || response.statusText || "Request failed";
     throw new Error(message);
   }

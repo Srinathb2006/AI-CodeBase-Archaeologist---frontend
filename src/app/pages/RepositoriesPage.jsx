@@ -4,6 +4,7 @@ import { Card, CardContent } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Badge } from "../components/Badge";
+import { toast } from "sonner";
 import {
   Search,
   FolderOpen,
@@ -13,7 +14,6 @@ import {
   Trash,
   Plus
 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
 import { getRepositories, deleteRepository } from "../services/storageService";
 
@@ -24,12 +24,23 @@ export function RepositoriesPage() {
     getRepositories().then(setRepositories);
   }, []);
 
-  const handleDelete = async (id) => {
-    if (window.confirm("Are you sure you want to delete this repository analysis? This cannot be undone.")) {
-      await deleteRepository(id);
-      const data = await getRepositories();
-      setRepositories(data);
-    }
+  const handleDelete = (id) => {
+    toast("Are you sure you want to delete this repository analysis? This cannot be undone.", {
+      action: {
+        label: "Delete",
+        onClick: async () => {
+          await deleteRepository(id);
+          const data = await getRepositories();
+          setRepositories(data);
+          toast.success("Repository deleted successfully");
+        },
+      },
+      cancel: {
+        label: "Cancel",
+        onClick: () => toast.dismiss(),
+      },
+      duration: Infinity,
+    });
   };
 
   const filteredRepos = repositories.filter((repo) =>
@@ -110,27 +121,6 @@ export function RepositoriesPage() {
                   </div>
                 </div>
 
-                {repo.languages && repo.languages.length > 0 && (
-                  <div className="w-20 h-20 shrink-0 self-center sm:self-start">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={repo.languages}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={20}
-                          outerRadius={35}
-                          paddingAngle={2}
-                          dataKey="value"
-                        >
-                          {repo.languages.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
               </div>
 
               <div className="flex items-center gap-2 pt-4 border-t border-white/5">

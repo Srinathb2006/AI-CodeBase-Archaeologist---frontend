@@ -13,6 +13,7 @@ import { APIExplorerPage } from "./pages/APIExplorerPage";
 import { DatabasePage } from "./pages/DatabasePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { isLoggedIn } from "./services/authService";
+import { Toaster } from "./components/ui/sonner";
 
 function ProtectedRoute() {
   return isLoggedIn() ? <Outlet /> : <Navigate to="/auth" replace />;
@@ -21,6 +22,7 @@ function ProtectedRoute() {
 export default function App() {
   return (
     <BrowserRouter>
+      <Toaster position="top-right" />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />

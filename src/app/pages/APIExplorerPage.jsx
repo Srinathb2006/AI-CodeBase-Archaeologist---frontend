@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Badge } from "../components/Badge";
-import { getRepositories } from "../services/storageService";
+import { getRepositories, getRepository } from "../services/storageService";
 import {
   Search,
   Filter,
@@ -14,6 +14,7 @@ import {
   Play,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 
 const defaultApiEndpoints = [
@@ -264,13 +265,24 @@ const defaultApiEndpoints = [
   },
 ];
 
+const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
+
 function normalizePath(path) {
   if (!path) return "/";
   return path
     .trim()
     .replace(/\\/g, "/")
-    .replace(/\/\/+/, "/")
+    .replace(/\/+/g, "/")
     .replace(/^(?!\/)/, "/");
+}
+
+function joinPaths(...paths) {
+  const joined = paths
+    .filter((part) => part !== undefined && part !== null && String(part).trim() !== "")
+    .map((part) => String(part).trim().replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean)
+    .join("/");
+  return normalizePath(joined || "/");
 }
 
 function inferCategoryFromPath(endpoint) {
@@ -294,8 +306,139 @@ function parseMethodsFromString(text) {
       .replace(/['"\[\]]/g, "")
       .split(/[,|\s]+/)
       .map((token) => token.trim().toUpperCase())
-      .filter((token) => ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"].includes(token))
+      .filter((token) => HTTP_METHODS.includes(token))
   )];
+}
+
+function stripComments(content) {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+function splitTopLevelArgs(args = "") {
+  const parts = [];
+  let current = "";
+  let quote = null;
+  let braceDepth = 0;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const char = args[index];
+    const previous = args[index - 1];
+
+    if ((char === "\"" || char === "'") && previous !== "\\") {
+      quote = quote === char ? null : quote || char;
+    }
+
+    if (!quote) {
+      if (char === "{") braceDepth += 1;
+      if (char === "}") braceDepth = Math.max(0, braceDepth - 1);
+      if (char === "," && braceDepth === 0) {
+        parts.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function extractMappingPaths(args = "") {
+  const paths = [];
+  const quotedPath = /(?:^|[,{\s])(?:value|path)\s*=\s*(?:\{([^}]+)\}|["']([^"']*)["'])/gi;
+  let match;
+
+  while ((match = quotedPath.exec(args))) {
+    const value = match[1] || match[2] || "";
+    const stringMatches = [...value.matchAll(/["']([^"']*)["']/g)].map((item) => item[1]);
+    if (stringMatches.length > 0) {
+      paths.push(...stringMatches);
+    } else if (value.trim()) {
+      paths.push(value.trim());
+    }
+  }
+
+  if (paths.length === 0) {
+    const positional = splitTopLevelArgs(args)[0] || "";
+    const stringMatches = [...positional.matchAll(/["']([^"']*)["']/g)].map((item) => item[1]);
+    paths.push(...stringMatches);
+  }
+
+  return paths.length > 0 ? paths : [""];
+}
+
+function extractRequestMappingMethods(args = "") {
+  const methodMatch = /method\s*=\s*(?:\{([^}]+)\}|([^,\s)]+))/i.exec(args);
+  return methodMatch ? parseMethodsFromString(methodMatch[1] || methodMatch[2]) : [];
+}
+
+function parseSpringMappingAnnotation(annotationName, args = "") {
+  if (annotationName === "RequestMapping") {
+    const methods = extractRequestMappingMethods(args);
+    return {
+      methods: methods.length > 0 ? methods : ["GET"],
+      paths: extractMappingPaths(args),
+    };
+  }
+
+  return {
+    methods: [annotationName.replace("Mapping", "").toUpperCase()],
+    paths: extractMappingPaths(args),
+  };
+}
+
+function findSpringAnnotations(annotationBlock = "") {
+  const annotations = [];
+  const mappingAnnotation = /@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)\b\s*(?:\(([\s\S]*?)\))?/gi;
+  let match;
+
+  while ((match = mappingAnnotation.exec(annotationBlock))) {
+    annotations.push(parseSpringMappingAnnotation(match[1], match[2] || ""));
+  }
+
+  return annotations;
+}
+
+function discoverSpringEndpoints(content, filePath, addEndpoint) {
+  const cleanContent = stripComments(content);
+  if (!/@(?:RestController|Controller)\b/.test(cleanContent)) {
+    return;
+  }
+
+  const classMatch = /((?:\s*@[A-Za-z][\w.]*\s*(?:\([\s\S]*?\))?\s*)*)\b(?:public\s+|abstract\s+|final\s+)*class\s+([A-Za-z_][\w]*)\b/.exec(cleanContent);
+  if (!classMatch || !/@(?:RestController|Controller)\b/.test(classMatch[1])) {
+    return;
+  }
+
+  const className = classMatch[2];
+  const classMappings = findSpringAnnotations(classMatch[1]).filter((mapping) => mapping.paths.length > 0);
+  const basePaths = classMappings.length > 0
+    ? classMappings.flatMap((mapping) => mapping.paths)
+    : [""];
+  const classBody = cleanContent.slice(classMatch.index + classMatch[0].length);
+  const methodPattern = /((?:\s*@[A-Za-z][\w.]*\s*(?:\([\s\S]*?\))?\s*)+)\s*(?:public|protected|private)?\s*(?:static\s+)?(?:final\s+)?[\w<>\[\], ?]+\s+([A-Za-z_][\w]*)\s*\([^;{}]*\)\s*(?:throws\s+[^{]+)?\{/g;
+  let methodMatch;
+
+  while ((methodMatch = methodPattern.exec(classBody))) {
+    const methodMappings = findSpringAnnotations(methodMatch[1]);
+    if (methodMappings.length === 0) continue;
+
+    methodMappings.forEach((mapping) => {
+      mapping.methods.forEach((method) => {
+        basePaths.forEach((basePath) => {
+          mapping.paths.forEach((routePath) => {
+            const endpoint = joinPaths(basePath, routePath);
+            const description = `${className}.${methodMatch[2]} in ${filePath}`;
+            addEndpoint(method, endpoint, description, filePath);
+          });
+        });
+      });
+    });
+  }
 }
 
 function discoverApiEndpoints(fileContents) {
@@ -367,24 +510,8 @@ function discoverApiEndpoints(fileContents) {
       addEndpoint(match[2], match[3], `Discovered in ${normalizedFilePath}`, normalizedFilePath);
     }
 
-    const springRoute = /@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)\s*\(\s*([^)]*)\)/gi;
-    while ((match = springRoute.exec(content))) {
-      const annotation = match[1];
-      const args = match[2];
-      const pathMatch = /(?:path|value)\s*=\s*['"]([^'\"]+)['"]/.exec(args);
-      const routePath = pathMatch ? pathMatch[1] : "";
-      if (!routePath) continue;
-
-      if (annotation !== "RequestMapping") {
-        addEndpoint(annotation.replace("Mapping", "").toUpperCase(), routePath, `Discovered in ${normalizedFilePath}`, normalizedFilePath);
-      } else {
-        const methods = parseMethodsFromString(args);
-        if (methods.length > 0) {
-          methods.forEach((method) => addEndpoint(method, routePath, `Discovered in ${normalizedFilePath}`, normalizedFilePath));
-        } else {
-          addEndpoint("GET", routePath, `Discovered in ${normalizedFilePath}`, normalizedFilePath);
-        }
-      }
+    if (lowerPath.endsWith(".java")) {
+      discoverSpringEndpoints(content, normalizedFilePath, addEndpoint);
     }
 
     if (/\.(ya?ml)$/.test(lowerPath) && content.includes("paths:")) {
@@ -462,8 +589,9 @@ export function APIExplorerPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [repositories, setRepositories] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
-  const [apiEndpoints, setApiEndpoints] = useState(defaultApiEndpoints);
+  const [apiEndpoints, setApiEndpoints] = useState([]);
   const [loadingRepos, setLoadingRepos] = useState(true);
+  const [scanningApis, setScanningApis] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMethod, setFilterMethod] = useState(null);
@@ -505,14 +633,69 @@ export function APIExplorerPage() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const scanSelectedRepository = async () => {
+      if (!selectedRepo) {
+        setApiEndpoints([]);
+        return;
+      }
+
+      setScanningApis(true);
+      try {
+        const repoForScan = Object.keys(selectedRepo.fileContents || {}).length > 0
+          ? selectedRepo
+          : await getRepository(selectedRepo.id);
+
+        if (cancelled) return;
+
+        if (repoForScan && repoForScan !== selectedRepo) {
+          setSelectedRepo((current) => (
+            current && String(current.id) === String(repoForScan.id) ? repoForScan : current
+          ));
+        }
+
+        const discovered = discoverApiEndpoints(repoForScan.fileContents || {});
+        setApiEndpoints(discovered);
+      } catch (error) {
+        console.error("Unable to scan repository APIs:", error);
+        if (!cancelled) setApiEndpoints([]);
+      } finally {
+        if (!cancelled) setScanningApis(false);
+      }
+    };
+
+    scanSelectedRepository();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRepo?.id]);
+
+  useEffect(() => {
     if (!selectedRepo) {
-      setApiEndpoints(defaultApiEndpoints);
       return;
     }
+    setSearchQuery("");
+    setFilterMethod(null);
+    setFilterAuth(null);
+    setExpandedEndpoint(null);
+  }, [selectedRepo?.id]);
 
-    const discovered = discoverApiEndpoints(selectedRepo.fileContents || {});
-    setApiEndpoints(discovered);
-  }, [selectedRepo]);
+  const handleRefreshScan = async () => {
+    if (!selectedRepo) return;
+    setScanningApis(true);
+    try {
+      const refreshedRepo = await getRepository(selectedRepo.id);
+      setSelectedRepo(refreshedRepo);
+      setApiEndpoints(discoverApiEndpoints(refreshedRepo.fileContents || {}));
+      setExpandedEndpoint(null);
+    } catch (error) {
+      console.error("Unable to refresh API scan:", error);
+      setApiEndpoints([]);
+    } finally {
+      setScanningApis(false);
+    }
+  };
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text);
@@ -545,8 +728,11 @@ export function APIExplorerPage() {
   });
 
   const categories = Array.from(new Set(apiEndpoints.map((e) => e.category)));
+  const hasApiEndpoints = apiEndpoints.length > 0;
   const headerSubtitle = selectedRepo
-    ? `Discovered ${apiEndpoints.length} endpoint${apiEndpoints.length === 1 ? "" : "s"} for repository ${selectedRepo.name}`
+    ? scanningApis
+      ? "Scanning Spring Boot controllers and REST mappings..."
+      : `Discovered ${apiEndpoints.length} endpoint${apiEndpoints.length === 1 ? "" : "s"} for the selected repository.`
     : "Select a repository to discover API endpoints from your codebase.";
 
   return (
@@ -558,7 +744,7 @@ export function APIExplorerPage() {
             <p className="text-muted-foreground">{headerSubtitle}</p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <Badge variant="info">{apiEndpoints.length} Endpoints</Badge>
+            <Badge variant="info">{scanningApis ? "Scanning" : `${apiEndpoints.length} Endpoints`}</Badge>
             {loadingRepos && (
               <span className="text-sm text-muted-foreground">Loading repositories...</span>
             )}
@@ -570,113 +756,79 @@ export function APIExplorerPage() {
           </div>
         </div>
 
-        {!loadingRepos && repositories.length > 0 && (
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
-                    Select repository to inspect API endpoints
-                  </p>
-                  <select
-                    id="api-explorer-repo-select"
-                    name="repositoryId"
-                    value={selectedRepo?.id || ""}
-                    onChange={(event) => {
-                      const repo = repositories.find(
-                        (r) => String(r.id) === String(event.target.value),
-                      );
-                      if (repo) {
-                        setSelectedRepo(repo);
-                        setSearchParams({ repoId: repo.id });
-                      }
-                    }}
-                    className="rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground"
-                  >
-                    {repositories.map((repo) => (
-                      <option key={repo.id} value={repo.id}>
-                        {repo.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {selectedRepo ? selectedRepo.description : "Choose a repo to analyze its API routes."}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                id="api-explorer-search"
-                name="searchQuery"
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
+      {hasApiEndpoints && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  id="api-explorer-search"
+                  name="searchQuery"
+                  placeholder="Search endpoints"
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  value={searchQuery}
+                />
+              </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Method:</span>
-                {Object.keys(methodColors).map((method) => (
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Method:</span>
+                  {Object.keys(methodColors).map((method) => (
+                    <Button
+                      key={method}
+                      variant={filterMethod === method ? "primary" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        setFilterMethod(filterMethod === method ? null : method)
+                      }
+                    >
+                      {method}
+                    </Button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Auth:</span>
                   <Button
-                    key={method}
-                    variant={filterMethod === method ? "primary" : "outline"}
+                    variant={filterAuth === true ? "primary" : "outline"}
                     size="sm"
                     onClick={() =>
-                      setFilterMethod(filterMethod === method ? null : method)
+                      setFilterAuth(filterAuth === true ? null : true)
                     }
                   >
-                    {method}
+                    Required
                   </Button>
-                ))}
-              </div>
+                  <Button
+                    variant={filterAuth === false ? "primary" : "outline"}
+                    size="sm"
+                    onClick={() =>
+                      setFilterAuth(filterAuth === false ? null : false)
+                    }
+                  >
+                    Public
+                  </Button>
+                </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Auth:</span>
-                <Button
-                  variant={filterAuth === true ? "primary" : "outline"}
-                  size="sm"
-                  onClick={() =>
-                    setFilterAuth(filterAuth === true ? null : true)
-                  }
-                >
-                  Required
-                </Button>
-                <Button
-                  variant={filterAuth === false ? "primary" : "outline"}
-                  size="sm"
-                  onClick={() =>
-                    setFilterAuth(filterAuth === false ? null : false)
-                  }
-                >
-                  Public
-                </Button>
+                {(filterMethod || filterAuth !== null) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFilterMethod(null);
+                      setFilterAuth(null);
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                )}
               </div>
-
-              {(filterMethod || filterAuth !== null) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setFilterMethod(null);
-                    setFilterAuth(null);
-                  }}
-                >
-                  Clear Filters
-                </Button>
-              )}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Endpoints by Category */}
       {categories.map((category) => {
@@ -826,16 +978,23 @@ export function APIExplorerPage() {
         );
       })}
 
-      {filteredEndpoints.length === 0 && (
-        <Card>
-          <CardContent className="pt-6 text-center py-12">
-            <Search className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No endpoints found</h3>
-            <p className="text-muted-foreground">
-              Try adjusting your search or filters
+      {!loadingRepos && !scanningApis && !hasApiEndpoints && (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold">No APIs detected</h3>
+            <p className="text-sm text-muted-foreground">
+              {selectedRepo
+                ? "No Spring Boot REST controller mappings were found in this repository."
+                : "Select a repository to scan for REST endpoints."}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+          {selectedRepo && (
+            <Button size="sm" variant="outline" className="gap-2 shrink-0" onClick={handleRefreshScan}>
+              <RefreshCw className="w-4 h-4" />
+              Refresh Scan
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

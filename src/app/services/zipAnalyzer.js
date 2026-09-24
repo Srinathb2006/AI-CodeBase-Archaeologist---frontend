@@ -119,6 +119,10 @@ const KEY_CONFIG_FILES = [
   "requirements.txt",
   "setup.py",
   "pyproject.toml",
+  "pipfile",
+  "gemfile",
+  "composer.json",
+  "pubspec.yaml",
   "go.mod",
   "cargo.toml",
   "dockerfile",
@@ -266,15 +270,10 @@ export async function analyzeZipFile(file) {
 
       // Determine if this is a source code file (counts toward language stats)
       const sourceLang = SOURCE_EXTENSION_MAP[ext];
-      const projectLang = PROJECT_EXTENSION_MAP[ext];
-      const lang = sourceLang || projectLang;
-
-      if (lang) {
-        langBytes[lang] = (langBytes[lang] || 0) + size;
+      if (sourceLang) {
+        langBytes[sourceLang] = (langBytes[sourceLang] || 0) + size;
         totalSourceBytes += size;
-        if (sourceLang) {
-          sourceFileCount++;
-        }
+        sourceFileCount++;
       }
 
       // Extract content from key configuration files or source code files under MAX_FILE_EXTRACT_BYTES,
@@ -294,6 +293,22 @@ export async function analyzeZipFile(file) {
         }
       }
     }
+  }
+
+  // Fallback for static HTML/CSS sites ONLY if zero programming languages were found
+  if (totalSourceBytes === 0) {
+    fileTree.forEach((file) => {
+      if (file.type !== "tree") {
+        const ext = file.path.split(".").pop().toLowerCase();
+        if (ext === "html" || ext === "htm") {
+          langBytes["HTML"] = (langBytes["HTML"] || 0) + file.size;
+          totalSourceBytes += file.size;
+        } else if (ext === "css" || ext === "scss" || ext === "sass" || ext === "less") {
+          langBytes["CSS"] = (langBytes["CSS"] || 0) + file.size;
+          totalSourceBytes += file.size;
+        }
+      }
+    });
   }
 
   // 3. Calculate language percentages — ensure they sum to exactly 100%

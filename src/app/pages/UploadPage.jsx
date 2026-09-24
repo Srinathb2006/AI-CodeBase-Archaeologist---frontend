@@ -3,17 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
-import { Upload, Github, CheckCircle, Loader, AlertTriangle } from "lucide-react";
+import { Upload, Github, Loader, AlertTriangle, CheckCircle } from "lucide-react";
 import { motion } from "motion/react";
 import JSZip from "jszip";
 
-import { parseGitHubUrl, fetchRepoMetadata, fetchRepoLanguages, fetchRepoTree } from "../services/githubService";
-import { analyzeZipFile } from "../services/zipAnalyzer";
-import { analyzeFolderFiles } from "../services/folderAnalyzer";
-import { analyzeRepository, detectCodebaseArchitecture } from "../services/repoAnalyzer";
-import { generateRepoSummary } from "../services/geminiService";
-import { uploadRepositoryZip } from "../services/storageService";
-import { getLanguageColor } from "../services/languageColors";
+import { parseGitHubUrl } from "../services/githubService";
+import { uploadRepositoryZip, importGitHubRepository } from "../services/storageService";
 
 export function UploadPage() {
   const [uploadMethod, setUploadMethod] = useState(null);
@@ -168,9 +163,6 @@ export function UploadPage() {
       return;
     }
 
-    setErrorMsg("Backend integration currently supports ZIP and folder uploads. Download the GitHub repository as a ZIP and upload it here.");
-    return;
-
     setUploading(true);
     setErrorMsg("");
     setDuplicateWarning("");
@@ -179,170 +171,29 @@ export function UploadPage() {
 
     try {
       setCurrentStep(0);
-      setProgressText(`Connecting to GitHub API and fetching ${owner}/${repo} metadata...`);
-      const metadata = await fetchRepoMetadata(owner, repo);
+      setProgressText(`Connecting to GitHub and validating repository ${owner}/${repo}...`);
 
       setCurrentStep(1);
-      setProgressText("Retrieving repository language byte statistics...");
-      const languages = await fetchRepoLanguages(owner, repo);
+      setProgressText(`Downloading repository archive for ${owner}/${repo} from GitHub...`);
+
+      const savedRepo = await importGitHubRepository(repoName.trim(), repo);
 
       setCurrentStep(2);
-      setProgressText("Downloading directory file tree structure (recursive)...");
-      const treeData = await fetchRepoTree(owner, repo, metadata.default_branch);
+      setProgressText("Spring Repository Service is extracting files...");
 
       setCurrentStep(3);
-      setProgressText("Scanning repository files for frameworks and tools...");
-      
-      // Since GitHub tree is flat paths, compile mock fileContents for key configuration files
-      // We don't download all files (to avoid rate limiting), but we can fetch specific key files if they exist in tree!
-      const fileContents = {};
-      const keyFileNames = [
-        "package.json", "pom.xml", "build.gradle", "build.gradle.kts",
-        "requirements.txt", "go.mod", "Cargo.toml", "Dockerfile",
-        "docker-compose.yml", "docker-compose.yaml", "application.properties",
-        "application.yml", "tsconfig.json", "vite.config.js", "vite.config.ts"
-      ];
+      setProgressText("Repository metadata and file structure stored in PostgreSQL.");
 
-      const keyFilesToFetch = treeData.tree.filter((node) => {
-        if (node.type !== "blob") return false;
-        const filename = node.path.split("/").pop();
-        return keyFileNames.includes(filename.toLowerCase());
-      });
-
-      if (keyFilesToFetch.length > 0) {
-        setProgressText(`Fetching ${keyFilesToFetch.length} configuration file contents for deep analysis...`);
-        const limitFiles = keyFilesToFetch.slice(0, 6);
-        for (const fileNode of limitFiles) {
-          try {
-            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${metadata.default_branch}/${fileNode.path}`;
-            const res = await fetch(rawUrl);
-            if (res.ok) {
-              fileContents[fileNode.path] = await res.text();
-            }
-          } catch (fetchError) {
-            console.warn(`Failed to fetch key file contents: ${fileNode.path}`, fetchError);
-          }
-        }
-      }
-
-      // After config files, also fetch a few source files (up to 20) for deeper analysis.
-      // Prioritize files in the repository root and src/ folder.
-      const sourceExtensions = [
-        "js", "jsx", "ts", "tsx", "py", "java", "go", "rb", "php",
-        "c", "cpp", "cs", "swift", "kt", "kts", "dart", "rs", "scala",
-      ];
-      const sourceFiles = treeData.tree.filter((node) => {
-        if (node.type !== "blob") return false;
-        const ext = node.path.split('.').pop().toLowerCase();
-        return sourceExtensions.includes(ext);
-      });
-      // Sort by proximity to root and then alphabetically
-      sourceFiles.sort((a, b) => {
-        const depthA = a.path.split('/').length;
-        const depthB = b.path.split('/').length;
-        return depthA - depthB || a.path.localeCompare(b.path);
-      });
-      const sourceFilesToFetch = sourceFiles.slice(0, 20);
-      if (sourceFilesToFetch.length > 0) {
-        setProgressText(`Fetching ${sourceFilesToFetch.length} source file contents for deep analysis...`);
-        for (const fileNode of sourceFilesToFetch) {
-          try {
-            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${metadata.default_branch}/${fileNode.path}`;
-            const res = await fetch(rawUrl);
-            if (res.ok) {
-              const text = await res.text();
-              // Guard against very large files; limit to 80KB
-              fileContents[fileNode.path] = text.length > 80000 ? text.substring(0, 80000) : text;
-            }
-          } catch (fetchError) {
-            console.warn(`Failed to fetch source file: ${fileNode.path}`, fetchError);
-          }
-        }
-      }
       setCurrentStep(4);
-      // Now that we have fileContents, run the repository analyzer
-      setProgressText("Scanning files for frameworks, tools, and architecture patterns...");
-      const techAnalysis = analyzeRepository(treeData.tree, fileContents);
-
-      setProgressText("Generating AI architectural summary with Gemini...");
-      
-      let aiSummary = null;
-      try {
-        const fullRepoData = {
-          metadata: { name: metadata.name, description: metadata.description },
-          languages: languages,
-          technologies: techAnalysis.technologies,
-          frameworks: techAnalysis.frameworks,
-          architecturePatterns: techAnalysis.architecturePatterns,
-          fileCount: treeData.tree.length,
-          fileTree: treeData.tree
-        };
-        aiSummary = await generateRepoSummary(fullRepoData);
-      } catch (aiError) {
-        console.warn("AI Summarization failed, using fallback summary:", aiError);
-        aiSummary = {
-          repositorySummary: metadata.description || `GitHub repository ${owner}/${repo}.`,
-          architectureOverview: `Detected technologies: ${techAnalysis.technologies.join(", ") || "None"}. Architecture pattern inferred: ${techAnalysis.architecturePatterns.join(", ")}.`,
-          insights: [
-            {
-              title: "Import Successful",
-              description: `Successfully connected and loaded ${treeData.tree.length} codebase records from GitHub.`,
-              status: "success"
-            },
-            {
-              title: "Gemini AI Unavailable",
-              description: `Could not retrieve live AI summary (${aiError.message || "Key missing"}). Default layout analysis is active.`,
-              status: "warning"
-            }
-          ],
-          suggestions: [
-            "Configure your VITE_GEMINI_API_KEY in the .env file to enable AI-powered summaries.",
-            "Verify dependencies and configurations in the file tree."
-          ]
-        };
-      }
+      setProgressText("Indexing repository chunks for RAG AI analysis...");
 
       setCurrentStep(5);
-      setProgressText("Writing repository package data to localStorage...");
+      setProgressText("Opening repository overview...");
 
-      const newRepoId = `github-${metadata.id}`;
-      const enrichedRepo = {
-        id: newRepoId,
-        name: metadata.name,
-        owner: owner,
-        description: metadata.description || "No description provided.",
-        language: languages[0]?.name || metadata.language || "Unknown",
-        files: treeData.tree.length,
-        lastAnalyzed: new Date().toLocaleString(),
-        status: "completed",
-        languages: languages.map((lang) => ({
-          name: lang.name,
-          value: lang.percentage,
-          bytes: lang.bytes,
-          color: getLanguageColor(lang.name)
-        })),
-        technologies: techAnalysis.technologies,
-        frameworks: techAnalysis.frameworks,
-        buildTools: techAnalysis.buildTools,
-        tools: techAnalysis.tools,
-        architecturePatterns: techAnalysis.architecturePatterns,
-        architecture: detectCodebaseArchitecture(treeData.tree, fileContents, techAnalysis),
-        fileTree: treeData.tree,
-        fileContents,
-        aiSummary,
-        stars: metadata.stargazers_count,
-        forks: metadata.forks_count,
-        watchers: metadata.watchers_count,
-        defaultBranch: metadata.default_branch,
-        type: "github"
-      };
-
-      console.log(`[UploadPage] GitHub: Saving repo "${metadata.name}" with ${Object.keys(fileContents).length} fileContents entries`);
-      await addRepository(enrichedRepo);
-      setTimeout(() => navigate(`/repositories/${newRepoId}`), 1000);
+      setTimeout(() => navigate(`/repositories/${savedRepo.id}`), 700);
     } catch (error) {
       console.error("GitHub import failed:", error);
-      setErrorMsg(`GitHub import failed: ${error.message}`);
+      setErrorMsg(`GitHub import failed: ${error.message || "Unable to import GitHub repository."}`);
       setUploading(false);
     }
   };
@@ -350,10 +201,10 @@ export function UploadPage() {
   // Steps matching the progress values
   const stepsList = [
     "Establishing connection...",
-    "Uploading repository package...",
+    "Retrieving repository archive...",
     "Extracting repository files...",
     "Indexing file structure...",
-    "Preparing AI context...",
+    "Preparing RAG AI context...",
     "Opening repository..."
   ];
 
@@ -622,7 +473,7 @@ export function UploadPage() {
             </li>
             <li className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5" />
-              <span><strong>GitHub Connect:</strong> Server-side GitHub import is not enabled yet. Download a GitHub repository as a ZIP and upload it here.</span>
+              <span><strong>GitHub Connect:</strong> Connect public GitHub repositories directly by URL or path. The backend streams the archive, extracts code structure, and runs RAG indexing.</span>
             </li>
             <li className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5" />
@@ -630,7 +481,7 @@ export function UploadPage() {
             </li>
             <li className="flex items-start gap-2">
               <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5" />
-              <span><strong>AI Analysis Service:</strong> Summaries, architecture explanations, documentation, and chat use the backend AI provider configuration.</span>
+              <span><strong>AI Analysis & RAG:</strong> Summaries, architectural analysis, Code Explorer, and AI chat use indexed codebase chunks stored in PostgreSQL.</span>
             </li>
           </ul>
         </CardContent>

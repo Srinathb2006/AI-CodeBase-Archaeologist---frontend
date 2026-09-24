@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "../components/Card";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Badge } from "../components/Badge";
+import { toast } from "sonner";
 import {
   User,
   Bell,
@@ -102,7 +103,7 @@ export function SettingsPage() {
   const notificationItems = [
     { key: "email", title: "Email Notifications", description: "Receive email updates about your repositories" },
     { key: "analysisComplete", title: "Analysis Complete", description: "Get notified when repository analysis is finished" },
-    { key: "weeklyReports", title: "Weekly Reports", description: "Receive weekly summary of your activity" },
+    
   ];
 
   return (
@@ -265,76 +266,8 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* API Keys */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="w-5 h-5" />
-            API Keys
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {apiKeys.map((k) => (
-              <div key={k.id} className="p-4 rounded-xl bg-muted/50 flex items-center justify-between">
-                <div>
-                  <div className="font-mono text-sm mb-1">{k.key}</div>
-                  <div className="text-sm text-muted-foreground">Created {k.created}</div>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => handleRevokeKey(k.id)}>
-                  Revoke
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" className="gap-2" onClick={handleGenerateKey}>
-              <Key className="w-4 h-4" />
-              Generate New Key
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Integrations */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Webhook className="w-5 h-5" />
-            Integrations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {[
-              { name: "GitHub", icon: "🐙" },
-              { name: "GitLab", icon: "🦊" },
-              { name: "Slack", icon: "💬" },
-              { name: "Discord", icon: "🎮" },
-            ].map((integration) => (
-              <div
-                key={integration.name}
-                className="flex items-center justify-between p-4 rounded-xl bg-muted/50"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="text-2xl">{integration.icon}</div>
-                  <div>
-                    <div className="font-medium mb-1">{integration.name}</div>
-                    <Badge variant={integrations[integration.name] ? "success" : "default"}>
-                      {integrations[integration.name] ? "Connected" : "Not Connected"}
-                    </Badge>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleToggleIntegration(integration.name)}
-                >
-                  {integrations[integration.name] ? "Disconnect" : "Connect"}
-                </Button>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+     
 
       {/* Danger Zone */}
       <Card className="border-red-500/50">
@@ -354,9 +287,19 @@ export function SettingsPage() {
                 variant="outline"
                 className="text-red-500 border-red-500 hover:bg-red-500/10"
                 onClick={() => {
-                  if (window.confirm("Are you sure you want to delete your account? This cannot be undone.")) {
-                    alert("Account deletion is disabled in demo mode.");
-                  }
+                  toast("Are you sure you want to delete your account? This cannot be undone.", {
+                    action: {
+                      label: "Delete",
+                      onClick: () => {
+                        toast.info("Account deletion is disabled in demo mode.");
+                      },
+                    },
+                    cancel: {
+                      label: "Cancel",
+                      onClick: () => toast.dismiss(),
+                    },
+                    duration: Infinity,
+                  });
                 }}
               >
                 Delete Account

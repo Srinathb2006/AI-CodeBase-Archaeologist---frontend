@@ -213,9 +213,35 @@ export function RepositoryOverviewPage() {
   const description = repo.description || "No description provided.";
   const files = repo.files ?? 0;
   const lastAnalyzed = repo.lastAnalyzed || "Unknown";
-  const languages = Array.isArray(repo.languages) && repo.languages.length > 0
+
+  // Sanitize languages to ensure non-code formats (JSON, Unknown, XML, YAML, Markdown) are never displayed
+  const rawLanguages = Array.isArray(repo.languages) && repo.languages.length > 0
     ? repo.languages
     : [{ name: "Unknown", value: 100, bytes: 0, color: "#6B7280" }];
+
+  const nonCodeNames = new Set(["json", "unknown", "xml", "yaml", "markdown", "text", "sql", "graphql"]);
+  const codeLanguages = rawLanguages.filter((l) => l && !nonCodeNames.has(String(l.name).toLowerCase()));
+  const hasPureCode = codeLanguages.some((l) => !["html", "css", "scss", "sass", "less"].includes(String(l.name).toLowerCase()));
+  const filteredLanguages = hasPureCode
+    ? codeLanguages.filter((l) => !["html", "css", "scss", "sass", "less"].includes(String(l.name).toLowerCase()))
+    : codeLanguages;
+
+  const effectiveLanguages = filteredLanguages.length > 0 ? filteredLanguages : (codeLanguages.length > 0 ? codeLanguages : rawLanguages);
+  const totalLangBytes = effectiveLanguages.reduce((sum, l) => sum + (Number(l.bytes) || 0), 0);
+  let assignedLangPct = 0;
+  const languages = effectiveLanguages.map((lang, idx) => {
+    const val = totalLangBytes > 0
+      ? idx === effectiveLanguages.length - 1
+        ? Number((100 - assignedLangPct).toFixed(1))
+        : Number((((Number(lang.bytes) || 0) / totalLangBytes) * 100).toFixed(1))
+      : lang.value;
+    assignedLangPct += val;
+    return {
+      ...lang,
+      value: val,
+      color: lang.color || getLanguageColor(lang.name),
+    };
+  });
 
   const primaryLang = languages[0]?.name || "Unknown";
   const fileStats = languages.map((lang) => ({
@@ -223,14 +249,29 @@ export function RepositoryOverviewPage() {
     count: lang.bytes !== undefined ? parseFloat((lang.bytes / 1024).toFixed(1)) : Math.round((lang.value / 100) * files),
   }));
 
-  // Render tech stack labels beautifully
-  const techStack = (Array.isArray(repo.technologyStack) && repo.technologyStack.length > 0)
-    ? repo.technologyStack.map((s) => ({ name: s.name, category: Array.isArray(s.categories) ? s.categories.join("/") : s.category || "Unknown", confidence: s.confidence, evidence: s.evidence }))
+  // Render tech stack labels dynamically from manifest analysis
+  const dynamicAnalysis = (Array.isArray(repo.technologyStack) && repo.technologyStack.length > 0)
+    ? null
+    : (Array.isArray(repo.fileTree) && repo.fileTree.length > 0)
+      ? analyzeRepository(repo.fileTree, repo.fileContents || {})
+      : null;
+
+  const effectiveStack = (Array.isArray(repo.technologyStack) && repo.technologyStack.length > 0)
+    ? repo.technologyStack
+    : (dynamicAnalysis?.technologyStack || []);
+
+  const techStack = effectiveStack.length > 0
+    ? effectiveStack.map((s) => ({
+        name: s.name,
+        category: Array.isArray(s.categories) ? s.categories.join("/") : s.category || "Unknown",
+        confidence: s.confidence,
+        evidence: s.evidence
+      }))
     : [
-        ...repo.technologies.map(t => ({ name: t, category: "Language/Core" })),
-        ...repo.frameworks.map(t => ({ name: t, category: "Framework/Library" })),
-        ...repo.buildTools.map(t => ({ name: t, category: "Build/Pkg Tool" })),
-        ...repo.tools.map(t => ({ name: t, category: "Linter/Utility" }))
+        ...(repo.technologies || []).map(t => ({ name: t, category: "Language/Core" })),
+        ...(repo.frameworks || []).map(t => ({ name: t, category: "Framework/Library" })),
+        ...(repo.buildTools || []).map(t => ({ name: t, category: "Build/Pkg Tool" })),
+        ...(repo.tools || []).map(t => ({ name: t, category: "Linter/Utility" }))
       ];
 
   // Convert flat tree into hierarchical structure

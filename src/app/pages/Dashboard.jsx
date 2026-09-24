@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
@@ -9,8 +9,6 @@ import {
   Code,
   FileText,
   GitBranch,
-  Clock,
-  Activity,
   Plus
 } from "lucide-react";
 import {
@@ -31,7 +29,6 @@ import { getLanguageColor } from "../services/languageColors";
 
 export function Dashboard() {
   const [repositories, setRepositories] = useState([]);
-  const navigate = useNavigate();
 
   useEffect(() => {
     getRepositories().then(setRepositories);
@@ -97,9 +94,12 @@ export function Dashboard() {
   let totalBytesAll = 0;
   let hasByteData = false;
 
+  const nonCodeNames = new Set(["json", "unknown", "xml", "yaml", "markdown", "text", "sql", "graphql"]);
+
   repositories.forEach((repo) => {
     if (Array.isArray(repo.languages)) {
       repo.languages.forEach((lang) => {
+        if (!lang || !lang.name || nonCodeNames.has(String(lang.name).toLowerCase())) return;
         const bytes = Number(lang.bytes) || 0;
         const pct = Number(lang.value) || 0;
         if (bytes > 0) {
@@ -160,53 +160,6 @@ export function Dashboard() {
       assignedPct += pct;
       languageData.push({ name, value: pct, color: name === "Other" ? "#6B7280" : getLanguageColor(name) });
     }
-  }
-
-  // 3. Generate dynamic analysis activities based on repositories
-  const recentProjects = [...repositories]
-    .sort((a, b) => new Date(b.updatedAt || b.lastAnalyzed) - new Date(a.updatedAt || a.lastAnalyzed))
-    .slice(0, 4);
-
-  // Compute relative time labels from real timestamps
-  const getRelativeTime = (dateStr) => {
-    if (!dateStr) return "Unknown";
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    if (isNaN(then)) return dateStr; // fallback to raw string (e.g. locale string)
-    const diffMs = now - then;
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return "Just now";
-    if (diffMin < 60) return `${diffMin} min ago`;
-    const diffHrs = Math.floor(diffMin / 60);
-    if (diffHrs < 24) return `${diffHrs}h ago`;
-    const diffDays = Math.floor(diffHrs / 24);
-    if (diffDays === 1) return "1 day ago";
-    return `${diffDays} days ago`;
-  };
-
-  const aiActivity = [];
-  recentProjects.forEach((repo) => {
-    const timeLabel = getRelativeTime(repo.updatedAt || repo.lastAnalyzed);
-    
-    aiActivity.push({
-      action: `Scanned codebase of "${repo.name}" and identified ${repo.language}`,
-      time: timeLabel
-    });
-
-    if (repo.aiSummary?.insights?.length > 0) {
-      aiActivity.push({
-        action: `Generated architectural insights for "${repo.name}" using Gemini`,
-        time: timeLabel
-      });
-    }
-  });
-
-  // Fallback if empty
-  if (aiActivity.length === 0) {
-    aiActivity.push({
-      action: "System ready. Import a repository to start generating archaeology records.",
-      time: "Now"
-    });
   }
 
   // Build weekly activity chart from actual repository analysis timestamps
@@ -340,71 +293,6 @@ export function Dashboard() {
             </Card>
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-6">
-            {/* Recent Projects */}
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>Recent Projects</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {recentProjects.map((project, index) => (
-                    <div
-                      key={project.id}
-                      onClick={() => navigate(`/repositories/${project.id}`)}
-                      className="flex items-center justify-between p-4 rounded-xl bg-muted/40 hover:bg-muted/75 transition-all cursor-pointer border border-white/5"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                          <FolderOpen className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                          <div className="font-semibold text-sm text-slate-200">{project.name}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {project.language} • {project.files.toLocaleString()} files
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <Badge variant="success" className="text-[10px] font-bold uppercase tracking-wider">
-                          Ready
-                        </Badge>
-                        <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 justify-end font-mono">
-                          <Clock className="w-3 h-3" />
-                          {project.lastAnalyzed}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* AI Activity Feed */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-primary" />
-                  AI Activity
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4 max-h-[300px] overflow-y-auto pr-1">
-                  {aiActivity.map((activity, index) => (
-                    <div key={index} className="flex gap-3 items-start">
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-slate-300 leading-normal">{activity.action}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
-                          {activity.time}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </>
       ) : (
         <Card className="max-w-4xl mx-auto">
